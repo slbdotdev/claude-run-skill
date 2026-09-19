@@ -6,13 +6,13 @@ from another agent or automation harness.
 `SKILL.md` covers:
 
 - `claude -p` invocation and working-directory handling;
-- prompt files, stdin limits, system prompts, and bare mode;
+- prompt files, stdin limits, system prompts, `CLAUDE.md`, skills, and bare mode;
 - permissions, restricted execution, and tool allowlists;
 - text, JSON, stream-JSON, and JSON Schema output;
 - diff-driven review without changing the reviewed tree;
 - session IDs, resume/fork, and persistence;
 - process ownership for long-running jobs and interrupted runs; and
-- model aliases, exact model strings, and effort selection.
+- model aliases, provider model IDs, and effort selection.
 
 ## Install
 

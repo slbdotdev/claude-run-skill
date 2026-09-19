@@ -1,13 +1,13 @@
 ---
 name: claude-run
-description: Run Claude Code non-interactively from another agent or automation harness, including prompt files, permissions, models and effort, structured output, streaming, session resume, reviews, and long-running jobs.
+description: Run Claude Code non-interactively from another agent or automation harness, including CLAUDE.md and skills, permission modes, structured output, streaming, session resume, reviews, and long-running jobs.
 ---
 
 # Run Claude Code headlessly
 
 Use `claude -p` (or `claude --print`) for one non-interactive run. Claude uses
-the caller's current working directory; there is no Codex-style `-C` flag, so
-change directory explicitly in the runner:
+the caller's current working directory, so change directory explicitly in the
+runner:
 
 ```bash
 (cd /path/to/repo && \
@@ -53,10 +53,22 @@ the entire default prompt is intentional. `--add-dir` grants access to
 additional working directories.
 
 For deterministic CI-style execution, `--bare` skips host hooks, plugins,
-MCP, auto memory, and `CLAUDE.md` discovery. It also does not use OAuth or the
-keychain, so provide an API key or explicit provider credentials. Do not use
-`--bare` when the run is supposed to consume the installed skill or host
-configuration unless you provide that context explicitly.
+MCP, auto memory, and automatic `CLAUDE.md` discovery. It also does not use
+OAuth or the keychain, so provide an API key or explicit provider credentials.
+Explicitly invoke any skill or provide any context that a bare run needs.
+
+## Claude-native context and skills
+
+Without `--bare`, print mode loads the same project and user context that an
+interactive session would, including `CLAUDE.md`, settings, hooks, MCP, and
+discovered skills. A user-invoked skill can be selected in the prompt with
+`/skill-name`; `--disable-slash-commands` turns off skills and custom slash
+commands for a run.
+
+Use `--settings <file-or-json>` for a deliberate per-run settings overlay.
+Use `--safe-mode` to troubleshoot a broken installation with customizations,
+skills, hooks, MCP, and memory disabled. `--safe-mode` is a diagnostic mode;
+it is not the same as `--bare` and is not a normal worker default.
 
 ## Choose output and input modes
 
@@ -67,6 +79,9 @@ configuration unless you provide that context explicitly.
 - `--output-format stream-json` emits newline-delimited events. Add
   `--verbose` and `--include-partial-messages` when a consumer needs token
   deltas; the final `result` event is the completion record.
+- `--forward-subagent-text` adds subagent text and thinking blocks to the
+  stream. Use `parent_tool_use_id` to distinguish subagent messages from the
+  main session, and only use it when the consumer needs those transcripts.
 - `--json-schema '<schema>'` validates structured output and requires
   `--output-format json`. Read the model's structured value from the
   `structured_output` field, not from streaming text deltas.
@@ -111,8 +126,7 @@ bypass.
 
 ## Review changes
 
-Claude Code's local CLI has no Codex-style `exec review --base/--commit`
-selector. Review the exact diff by supplying it as input and ask for findings:
+Review the exact diff by supplying it as input and ask for findings:
 
 ```bash
 git diff --cached --no-ext-diff | \
@@ -201,22 +215,21 @@ do not silently fall back to a different provider or model family. Use
 
 ## Choose a model and effort
 
-Aliases such as `opus`, `sonnet`, and `haiku` move as Claude Code updates.
-Use an exact model string when reproducibility matters and confirm that the
-account or provider exposes it:
+Use `--model opus`, `--model sonnet`, or `--model haiku` when the account's
+current aliases are what you want. Pin a full model ID only when
+reproducibility matters, and obtain that ID from the account/provider's current
+model list rather than copying a stale value into this skill.
 
-| Common name | Exact model string | Recommended starting effort | Best fit |
-| --- | --- | --- | --- |
-| Opus | `claude-opus-5` | `high` | hardest, highest-risk work |
-| Sonnet | `claude-sonnet-5` | `medium` | everyday features, fixes, tests, review |
-| Haiku | `claude-haiku-4-5-20251001` | `low` | fast questions and mechanical edits |
+Use `--effort low|medium|high|xhigh|max` as a model-dependent starting point:
 
-These are starting points, not guarantees. Effort is model-dependent and can
-be set with `--effort low|medium|high|xhigh|max`; lower effort is usually the
-cost/latency lever, while higher effort is for work where additional reasoning
-is worth the time. A model alias may resolve differently after an update, so
-refresh `claude --help` and the provider's current model list before pinning a
-new deployment.
+- choose the model's lower effort levels for fast questions and mechanical
+  edits;
+- use medium for ordinary features, fixes, tests, and documentation;
+- raise effort for complex, high-risk, or long-horizon work; and
+- use `--max-budget-usd` in print mode when an API-backed run needs an explicit
+  spend ceiling.
 
-For independent review, prefer a model family different from the author where
-one is available. Record any same-family fallback honestly.
+Effort availability, model aliases, pricing, and subscription limits vary by
+model and provider. Check the installed help and current provider docs before
+making a deployment-wide choice. For independent review, use a separate
+model/session where possible and record any fallback honestly.
