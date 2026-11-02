@@ -1,26 +1,30 @@
 # claude-run
 
-A Claude Code skill for running the Claude CLI as a non-interactive worker
-from another agent or automation harness.
+A Claude Code skill for running the `claude` CLI as a non-interactive worker
+from another agent, a script, or a CI job.
 
 `SKILL.md` covers:
 
-- `claude -p` invocation and working-directory handling;
-- prompt files, stdin limits, system prompts, `CLAUDE.md`, skills, and bare mode;
-- permissions, restricted execution, and tool allowlists;
+- `claude -p` and how the working directory is chosen;
+- prompt files, stdin (and its 10 MB cap), and prompts after list flags;
+- system prompts, `CLAUDE.md`, skills, and bare mode;
+- permission modes, tool lists, restricted mode, and turn and budget caps;
 - text, JSON, stream-JSON, and JSON Schema output;
-- diff-driven review without changing the reviewed tree;
-- session IDs, resume/fork, and persistence;
-- process ownership for long-running jobs and interrupted runs; and
-- model aliases, provider model IDs, and effort selection.
+- reviewing a piped diff with read-only tools;
+- session IDs, resume and fork, and session persistence;
+- background work, process ownership, and stopped or failed runs; and
+- model aliases, pinned model IDs, and effort levels.
+
+The skill was checked against Claude Code 2.1.316 and its documentation.
 
 ## Install
 
-Place this directory in the skill directory used by Claude Code, keeping the
-directory name `claude-run`. Claude Code must already be installed and
-authenticated; this skill does not install or authenticate the CLI.
+Put this directory in a Claude Code skills directory, such as
+`~/.claude/skills/claude-run/` or `.claude/skills/claude-run/` in a project.
+Keep the directory name `claude-run`. Claude Code must already be installed
+and signed in; this skill does not install or authenticate it.
 
-The CLI is versioned. When a command or option is uncertain, check:
+The CLI changes between releases. When a flag is uncertain, check:
 
 ```bash
 claude --help

@@ -1,235 +1,294 @@
 ---
 name: claude-run
-description: Run Claude Code non-interactively from another agent or automation harness, including CLAUDE.md and skills, permission modes, structured output, streaming, session resume, reviews, and long-running jobs.
+description: Run Claude Code non-interactively (`claude -p`) from another agent, script, or CI job. Covers prompts and stdin, CLAUDE.md and skills, bare mode, permissions, JSON, streaming, and structured output, session IDs and resume, diff review, long-running jobs, and model and effort choice.
 ---
 
 # Run Claude Code headlessly
 
-Use `claude -p` (or `claude --print`) for one non-interactive run. Claude uses
-the caller's current working directory, so change directory explicitly in the
-runner:
+`claude -p` (long form `--print`) runs one task without a person and exits.
+Claude works in the current directory of the process that starts it, so set
+the directory in the runner:
 
 ```bash
 (cd /path/to/repo && \
-  claude -p \
-    --model <model> \
-    --effort medium \
-    --output-format json \
-    < /tmp/claude-brief.md \
-    > /tmp/claude-result.json)
+  claude -p --model sonnet --effort medium --output-format json \
+    < brief.md > result.json)
 ```
 
-The machine that launches the worker needs an installed and authenticated
-`claude` command. This skill does not install or authenticate Claude Code.
-Find the executable with `command -v claude` and use its absolute path in a
-service runner; service managers often do not inherit the interactive shell's
-`PATH`.
+Before you rely on it:
 
-Check the installed CLI before relying on a flag:
+- The machine needs an installed, signed-in `claude` command. This skill does
+  not install or authenticate it.
+- In a service, call Claude by the absolute path from `command -v claude`.
+  Service managers often do not inherit the shell's `PATH`.
+- Flags change between releases. Check `claude --version` and `claude --help`.
+  Version numbers below mark when a flag or behavior first appeared.
+- `-p` skips the workspace trust dialog. Without `--bare`, it runs the
+  project's hooks and connects the MCP servers in its `.mcp.json`, even in a
+  folder nobody has trusted. Run it only in directories you trust.
+- In `-p` mode, a settings file that fails validation is ignored without an
+  error.
 
-```bash
-claude --help
-claude --version
-```
+## Prompts and input
 
-## Prompts and context
+Write the brief to a file. It should state:
 
-Prefer a brief in a file. It should state:
-
-- the task, scope, and working directory;
+- the task, the scope, and the working directory;
 - files or directories the worker must not change;
-- required checks or acceptance criteria; and
-- the required final report, including anything it could not verify.
+- the checks or acceptance criteria; and
+- the final report you want, including anything it could not verify.
 
-Print mode reads stdin, so `claude -p < brief.md` is the normal file-input
-form. Stdin is capped at 10 MB; for larger context, put the data in the
-workspace and tell Claude which file to read rather than piping it wholesale.
-Use one prompt input method and keep the output on a separate file descriptor
-or redirection.
+There are three ways to pass the prompt:
 
-Use `--append-system-prompt` to add a worker instruction while retaining
-Claude Code's normal system prompt. Use `--system-prompt` only when replacing
-the entire default prompt is intentional. `--add-dir` grants access to
-additional working directories.
+- `claude -p < brief.md` reads the prompt from stdin.
+- `claude -p "prompt"` takes the prompt as an argument.
+- `cat data.txt | claude -p "instruction"` uses both. Claude receives the
+  argument first, then the stdin text.
 
-For deterministic CI-style execution, `--bare` skips host hooks, plugins,
-MCP, auto memory, and automatic `CLAUDE.md` discovery. It also does not use
-OAuth or the keychain, so provide an API key or explicit provider credentials.
-Explicitly invoke any skill or provide any context that a bare run needs.
+Piped stdin is capped at 10 MB. Above that, `claude` exits with an error. For
+larger input, write the data to a file in the workspace and name the path in
+the prompt.
 
-## Claude-native context and skills
-
-Without `--bare`, print mode loads the same project and user context that an
-interactive session would, including `CLAUDE.md`, settings, hooks, MCP, and
-discovered skills. A user-invoked skill can be selected in the prompt with
-`/skill-name`; `--disable-slash-commands` turns off skills and custom slash
-commands for a run.
-
-Use `--settings <file-or-json>` for a deliberate per-run settings overlay.
-Use `--safe-mode` to troubleshoot a broken installation with customizations,
-skills, hooks, MCP, and memory disabled. `--safe-mode` is a diagnostic mode;
-it is not the same as `--bare` and is not a normal worker default.
-
-## Choose output and input modes
-
-- `--output-format text` is the default plain final response.
-- `--output-format json` emits one JSON result with the final text, session ID,
-  usage/cost metadata, and other run metadata. Check the exit status as well:
-  a run-time failure can still print a failure result on stdout.
-- `--output-format stream-json` emits newline-delimited events. Add
-  `--verbose` and `--include-partial-messages` when a consumer needs token
-  deltas; the final `result` event is the completion record.
-- `--forward-subagent-text` adds subagent text and thinking blocks to the
-  stream. Use `parent_tool_use_id` to distinguish subagent messages from the
-  main session, and only use it when the consumer needs those transcripts.
-- `--json-schema '<schema>'` validates structured output and requires
-  `--output-format json`. Read the model's structured value from the
-  `structured_output` field, not from streaming text deltas.
-- `--input-format stream-json` is for a caller that sends a realtime message
-  stream; ordinary briefs should use text stdin.
-
-Example structured result:
+Some flags take a list of values: `--tools`, `--allowedTools`,
+`--disallowedTools`, `--add-dir`, and `--mcp-config`. A prompt argument placed
+after one of them is read as another list item, and the run fails with
+"Input must be provided". Put the prompt before those flags, or after `--`:
 
 ```bash
-claude -p "Extract the risky changes" \
+claude -p --tools "Read,Grep,Glob" -- "Summarize the README"
+```
+
+To change the system prompt:
+
+- `--append-system-prompt "<text>"` or `--append-system-prompt-file <file>`
+  adds instructions and keeps Claude Code's default prompt. Use this normally.
+- `--system-prompt` or `--system-prompt-file` replaces the whole default
+  prompt. Use it only when that is intended.
+
+`--add-dir <dir>` gives the run access to directories outside the working
+directory.
+
+## Project context, skills, and bare mode
+
+Without `--bare`, `claude -p` loads what an interactive session loads from the
+working directory and `~/.claude`: `CLAUDE.md`, settings, hooks, plugins, MCP
+servers, subagents, skills, and auto memory.
+
+- Put `/skill-name` in the prompt to run a user-invoked skill.
+- `--disable-slash-commands` turns off all skills and commands for the run.
+- `--settings <file-or-json>` adds settings for one run.
+  `--setting-sources user,project,local` picks which settings files load.
+- `--mcp-config <file>` with `--strict-mcp-config` uses only the MCP servers
+  you name.
+
+`--bare` skips that discovery. Use it in CI when every machine should start
+the same way. Claude Code's docs recommend it for scripted calls and say it
+will become the `-p` default in a future release. In bare mode:
+
+- Anthropic API auth comes only from `ANTHROPIC_API_KEY` or an
+  `apiKeyHelper` in `--settings`. OAuth sign-in and the keychain are never
+  read. Bedrock, Google Cloud, and Microsoft Foundry still use their own
+  credentials.
+- Pass the context you need with flags: `--append-system-prompt[-file]`,
+  `--settings`, `--mcp-config`, `--agents`, `--plugin-dir`, and `--add-dir`.
+  Bare mode loads skills from an added directory's `.claude/skills/`.
+- `/skill-name` in the prompt still runs a skill.
+- Claude cannot run background commands or background subagents.
+
+`--safe-mode` is for troubleshooting a broken setup. It turns off `CLAUDE.md`,
+skills, plugins, hooks, MCP servers, and other customizations, but keeps
+normal sign-in. It is not a worker default and is not the same as `--bare`.
+
+## Output
+
+- `--output-format text` (the default) prints only the final response.
+- `--output-format json` prints one JSON object. `result` holds the final
+  text. Other fields include `session_id`, `is_error`, `subtype`, usage, and
+  `total_cost_usd`, which is a client-side estimate. Check both the exit
+  status and `is_error`.
+- `--output-format stream-json` prints one JSON event per line. With `-p` it
+  requires `--verbose`. Add `--include-partial-messages` for token-by-token
+  deltas. The final `result` event is the completion record.
+- In the stream, messages from subagents carry the `parent_tool_use_id` of
+  the call that started them. Main-conversation messages carry `null`.
+  `--forward-subagent-text` also forwards subagents' text and thinking. It
+  works only with stream-json.
+- `--input-format stream-json` is for a caller that sends messages as a live
+  stream. An ordinary brief uses plain text.
+
+For structured output, pass a JSON Schema with `--json-schema` and use
+`--output-format json`. Read the value from `structured_output`:
+
+```bash
+claude -p "List the risky changes in this repo" \
   --output-format json \
   --json-schema '{"type":"object","properties":{"risks":{"type":"array","items":{"type":"string"}}},"required":["risks"]}' \
-  > /tmp/claude-risk.json
+  | jq '.structured_output'
 ```
 
-## Permissions and isolation
+If the run ends without valid structured output, for example because Claude
+declined, `structured_output` is missing. Check that it exists before you use
+it. An invalid schema makes `claude` exit with an error.
 
-Print mode is non-interactive, but a tool that would prompt still needs an
-explicit policy. Choose the least authority that can complete the task:
+## Permissions
 
-- `--restricted` removes code-running tools and ignores user, project, and
-  local settings; it confines file tools to the working directories and
-  refuses bypass permissions.
-- `--tools "Read,Glob,Grep"` restricts the built-in tool set for read-only
-  probes. `--disallowedTools` adds explicit denials; MCP tools need their own
-  restrictions.
-- `--permission-mode plan` is a good starting point for inspection and
-  planning. `acceptEdits` auto-approves file edits while leaving other actions
-  subject to permissions. `auto` uses Claude's classifier. `dontAsk` denies
-  anything that would require a person.
-- `--permission-prompts none` prevents an unattended run from waiting for a
-  permission host; requests not otherwise allowed are denied. It is available
-  in current Claude Code releases, but check help on older installations.
-- `--dangerously-skip-permissions` bypasses all checks. Use it only in a
-  disposable, externally isolated sandbox; it is not a normal automation
-  default.
+No person answers permission prompts in a `-p` run. A tool call that needs
+approval is denied unless a permission rule, a hook, the permission mode, or a
+permission host allows it. A permission host is an Agent SDK `canUseTool`
+callback or an MCP tool named with `--permission-prompt-tool`. From v2.1.302,
+a `-p` run starts in Manual mode when nothing sets a mode. Give the run the
+least authority that can finish the task:
 
-For a read-only review, combine a restricted tool set with a prompt that
-forbids edits. For a controlled editing run, prefer `acceptEdits` plus an
-allowlist such as `--allowedTools "Read,Edit,Bash(git diff *)"` over a global
-bypass.
+- `--tools "Read,Grep,Glob"` makes only those built-in tools exist. Use it for
+  read-only work. It does not affect MCP tools; add
+  `--disallowedTools "mcp__*"` to block those too.
+- `--allowedTools "Edit,Bash(npm test *)"` pre-approves tools or commands.
+  The space before `*` matters: `Bash(git diff *)` matches commands that start
+  with `git diff `, but `Bash(git diff*)` also matches `git diff-index`.
+- `--disallowedTools` denies tools.
+- `--permission-mode` sets the baseline:
+  - `manual` (config value `default`): edits, most shell commands, and
+    network access need approval, so in `-p` they are denied unless allowed
+    another way.
+  - `plan`: Claude reads and plans, but does not edit.
+  - `acceptEdits`: file edits and common file commands (`mkdir`, `touch`,
+    `mv`, `cp`) are approved. Other shell commands and network access still
+    need allow rules.
+  - `dontAsk`: anything that would prompt is denied. Allow rules and
+    read-only actions still run. Suits locked-down CI.
+  - `auto`: a classifier model reviews each action.
+- `--permission-prompts none` (v2.1.259+) matters when the run has a
+  permission host. Without it, the run waits for that host. With
+  it, those requests are denied and Claude is told not to retry. In a plain
+  `-p` run with no host, such requests are denied anyway, and the flag only
+  stops retries.
+- `--restricted` (v2.1.248+) is for a harness on a shared machine. It removes
+  tools that run commands or code, and WebFetch, unless you name them in
+  `--tools`. It ignores user, project, and local settings files. Managed
+  settings and `--settings` still apply. It confines file tools to the
+  working directories and refuses `bypassPermissions`. MCP servers still load
+  unless you add `--strict-mcp-config`.
+- `--max-turns <n>` and `--max-budget-usd <amount>` limit a run's length and
+  spend. The budget uses a client-side estimate, includes subagents, and can
+  overshoot.
+- `--dangerously-skip-permissions` turns off every check. Use it only in a
+  disposable sandbox with no network access.
 
-## Review changes
+For an editing run, prefer `--permission-mode acceptEdits` plus a narrow
+`--allowedTools` list over a global bypass.
 
-Review the exact diff by supplying it as input and ask for findings:
+## Review a diff
+
+Pipe the diff in so Claude does not need shell access to find it. Give the
+reviewer read-only tools:
 
 ```bash
 git diff --cached --no-ext-diff | \
-  claude -p \
+  claude -p "Review this diff for correctness, security, and missing tests." \
     --append-system-prompt "You are an independent code reviewer. Do not edit files. Return prioritized findings with file and line references." \
-    --permission-mode plan \
-    --permission-prompts none \
+    --tools "Read,Grep,Glob" \
     --output-format json \
-    "Review the supplied diff for correctness, security, and missing tests." \
-    > /tmp/claude-review.json
+    > review.json
 ```
 
-Use `git diff origin/main...HEAD` or another explicit Git range when that is
-the review scope. Piping the diff means Claude does not need Bash permission
-to discover it. Keep the review model independent from the author's family
-where possible; if that is not possible, use a fresh blind run and label it
-the weaker form of review.
+For a branch, use an explicit range such as `git diff origin/main...HEAD`.
 
-The installed CLI also exposes `claude ultrareview`; it is a separate
-cloud-hosted multi-agent workflow. Check `claude ultrareview --help` before
-using it, and do not confuse it with the local, deterministic diff pattern
-above.
+A fresh session shares no conversation with the author's session. It is still
+the same model family. If the author was also Claude, say so in the report.
+
+`claude ultrareview [target]` is a different tool. It sends the current
+branch, a PR number, or a base branch to a cloud-hosted multi-agent review.
+Check `claude ultrareview --help` before using it.
 
 ## Sessions and resume
 
-Sessions persist by default. Do not use `--no-session-persistence` for work
-that may need audit or continuation: it disables the on-disk record and makes
-the session non-resumable.
+Sessions are saved to disk by default. `--no-session-persistence` turns that
+off, and the run then cannot be resumed or audited. Do not use it for work
+that might need follow-up.
 
-Capture the session ID from JSON output and resume deliberately:
+Choose the session ID yourself. The caller then knows it before the run
+starts, even if the run crashes:
 
 ```bash
-session_id=$(claude -p "Start the investigation" \
-  --output-format json | jq -r '.session_id')
-claude -p "Continue the investigation and verify the result" \
-  --resume "$session_id" \
-  --output-format json
+session_id=$(uuidgen)
+claude -p --session-id "$session_id" --output-format json \
+  < brief.md > result.json
+claude -p "Continue and verify the result" \
+  --resume "$session_id" --output-format json > followup.json
 ```
 
-`--continue` resumes the most recent conversation in the current project;
-`--resume` accepts a session ID, name, or transcript path. Use
-`--fork-session` when the follow-up should receive a new session ID. The
-session ID is the durable handoff key; do not identify a run by a process ID.
+- When the caller is itself a Claude Code session, the child can inherit the
+  parent's session ID from the environment. `--session-id` prevents that.
+- `--resume` accepts a session ID, a session name, or the absolute path to
+  the session's `.jsonl` transcript. It finds an ID in any project on the
+  machine.
+- `--continue` resumes the most recent conversation in the current directory.
+- `--fork-session` with `--resume` or `--continue` gives the follow-up a new
+  session ID and leaves the original unchanged.
+- On resume, new system prompt flags have no effect at first. Claude Code
+  reuses the prompt recorded on the first request until the conversation is
+  compacted. Pass `--system-prompt-snapshot off` to rebuild it on every
+  request.
+- After a resume, `total_cost_usd` covers the whole conversation, including
+  earlier runs.
+
+Identify a run by its session ID, not by its process ID.
 
 ## Long-running jobs
 
-`claude -p` blocks until the print run finishes. The interactive `--bg`/
-`--background` option starts a background session and returns an ID, but it is
-not compatible with `-p`; manage such sessions with `claude attach`, `logs`,
-`stop`, and `rm` only when an interactive background session is what you want.
+`claude -p` blocks until the task finishes. After Claude's last turn, it also
+waits for background work that Claude started:
 
-If the calling harness reaps its own child processes, launch the print run
-under an owner the harness does not control. On Linux with systemd:
+- background commands, until they exit or hit their time limit; Claude then
+  takes one more turn with the outcome;
+- background subagents and workflows, until they finish; and
+- other idle waiting, for at most 10 minutes. Set
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` to change the cap, or `0` for none.
+
+It does not wait for MCP work running in the background. A `-p` run is not a
+supervisor: start a service that must outlive the run outside Claude.
+
+`--bg` starts an interactive background session that you manage with
+`claude agents`, `attach`, `logs`, `stop`, and `rm`. It refuses to run with
+`-p`. Use it only when you want a session you can attach to.
+
+If the calling harness kills its child processes when it exits, start the
+run under an owner the harness does not control. On Linux with systemd:
 
 ```bash
 systemd-run --user --unit=claude-<job> --collect /path/to/runner.sh
 ```
 
-The runner should call Claude by its absolute path and write prompts and
-results to inspectable files. Claude also terminates background Bash tasks a
-few seconds after a print run returns; a child started inside Claude is not a
-reliable job supervisor. Put the long-lived process outside Claude under
-systemd, `launchd`, a terminal multiplexer, a container, or another durable
-owner. Subagents and workflows are different: print mode waits for their
-results, subject to Claude's configured wait ceiling.
+`launchd`, `tmux`, or a container also work. The runner should call `claude`
+by its absolute path and write prompts and results to files.
 
-## Failed or interrupted runs
+## Stopped or failed runs
 
-If a run stops before producing a trustworthy report, inspect the workspace
-before retrying:
+- SIGTERM makes `claude` exit with code 143. The current turn stays unfinished
+  with no result, and any running Bash command's process tree is killed. Send
+  SIGINT first if you want the turn to end cleanly.
+- On resume, Claude leaves an interrupted turn as it is, and your next prompt
+  drives the conversation. Set `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1` to have
+  it continue that turn instead.
+- Claude may have edited files before it stopped. Before you retry, run
+  `git status --short` and `git diff`, and run the relevant checks yourself.
+- For sign-in, quota, or model errors, report the exact command. Do not
+  silently switch to another provider or model. Use
+  `--fallback-model <model>[,<model>...]` only on purpose, and record it.
+  The fallback list is used when the primary model is overloaded or
+  unavailable, and the primary is tried again at each new user turn.
 
-```bash
-git status --short
-git diff
-```
+## Model and effort
 
-Claude may have edited files before its final result was emitted. Run the
-relevant checks yourself and resume the existing session or start a new brief
-that accounts for the edits. A process killed with SIGTERM exits 143 and can
-leave its current turn unfinished; resume the recorded session instead of
-assuming it made no progress.
-
-For authentication, quota, or model failures, report the exact invocation and
-do not silently fall back to a different provider or model family. Use
-`--fallback-model` only when that change is deliberate and recorded.
-
-## Choose a model and effort
-
-Use `--model opus`, `--model sonnet`, or `--model haiku` when the account's
-current aliases are what you want. Pin a full model ID only when
-reproducibility matters, and obtain that ID from the account/provider's current
-model list rather than copying a stale value into this skill.
-
-Use `--effort low|medium|high|xhigh|max` as a model-dependent starting point:
-
-- choose the model's lower effort levels for fast questions and mechanical
-  edits;
-- use medium for ordinary features, fixes, tests, and documentation;
-- raise effort for complex, high-risk, or long-horizon work; and
-- use `--max-budget-usd` in print mode when an API-backed run needs an explicit
-  spend ceiling.
-
-Effort availability, model aliases, pricing, and subscription limits vary by
-model and provider. Check the installed help and current provider docs before
-making a deployment-wide choice. For independent review, use a separate
-model/session where possible and record any fallback honestly.
+- `--model` takes an alias or a full model ID. Aliases include `fable`,
+  `opus`, `sonnet`, and `haiku`. Each points to the latest model of that
+  kind, so its target changes over time. To pin a model for repeatable runs,
+  take the full ID from your provider's current model list, not from an old
+  example.
+- `--effort low|medium|high|xhigh|max` sets how much Claude reasons. The
+  levels available depend on the model. Start with `low` for quick questions
+  and mechanical edits, `medium` for ordinary features, fixes, tests, and
+  docs, and a higher level for complex, high-risk, or long work.
+- Pricing, usage limits, and which aliases exist vary by provider and plan.
+  Check the provider's current docs before choosing a setting for every
+  deployment.
