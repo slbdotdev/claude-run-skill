@@ -93,14 +93,17 @@ and name the file to read.
 
 - `--output-format text` (default) prints the final response.
 - `--output-format json` prints one result object with the final text,
-  `session_id`, and usage and cost metadata. Check the exit status too: a
-  failed run can still print a result.
-- `--output-format stream-json` prints newline-delimited events ending in a
-  `result` event. Add `--verbose --include-partial-messages` for token
-  deltas, and `--forward-subagent-text` for subagent transcripts
-  (distinguished by `parent_tool_use_id`).
-- `--json-schema '<schema>'` validates structured output; use it with JSON
-  output and read the `structured_output` field.
+  `session_id`, and usage and cost metadata. A failed run (unknown model,
+  authentication error, budget exceeded) exits 1 but still prints a result
+  object with `is_error: true`, so check both.
+- `--output-format stream-json --verbose` prints newline-delimited events
+  ending in a `result` event; print mode rejects `stream-json` without
+  `--verbose`. Add `--include-partial-messages` for token deltas, and
+  `--forward-subagent-text` for subagent transcripts (distinguished by
+  `parent_tool_use_id`).
+- `--json-schema '<schema>'` validates structured output. With JSON output,
+  read the `structured_output` field; with text output, the validated JSON
+  is printed as the response.
 
 ```bash
 claude -p "Extract the risky changes" \
@@ -130,6 +133,10 @@ grant the least authority that completes the task:
 
 For a controlled editing run, prefer `acceptEdits` plus an allowlist over a
 global bypass.
+
+Flags that take a list (`--tools`, `--allowedTools`, `--disallowedTools`,
+`--add-dir`) consume a positional prompt that follows them. Pipe the prompt
+on stdin, or put another option between the list and the prompt.
 
 ## Review a diff
 
@@ -181,12 +188,12 @@ systemd-run --user --unit=claude-<job> --collect /path/to/runner.sh
 ```
 
 The runner should call `claude` by absolute path and write prompts and
-results to inspectable files. Do not start long-lived processes from inside
-the run: Claude terminates background Bash tasks shortly after a print run
-returns. Subagents are different; print mode waits for their results.
+results to inspectable files. Do not rely on a process started inside the
+run outliving it; put long-lived processes under the external owner.
 
-`claude --bg` instead starts a detached interactive-style session and prints
-an ID for `claude attach`, `logs`, `stop`, and `rm`.
+`--bg` cannot be combined with `-p`. `claude --bg '<task>'` starts a detached
+interactive session and prints an ID for `claude attach`, `logs`, `stop`,
+and `rm`.
 
 ## Failed or interrupted runs
 
