@@ -12,7 +12,7 @@ caller's current directory, so change directory explicitly:
 (cd /path/to/repo && \
   claude -p \
     --model fable \
-    --effort high \
+    --effort medium \
     --output-format json \
     < /tmp/claude-brief.md \
     > /tmp/claude-result.json)
@@ -41,8 +41,9 @@ Foundry.
 
 `--effort low|medium|high|xhigh|max` sets reasoning depth and token spend:
 
-- `low` for quick questions and mechanical edits; `medium` for routine work;
-- `high` for complex or high-risk work, and as the starting point on Fable;
+- `low` for quick questions and mechanical edits;
+- `medium` for routine work, and as the starting point on Fable;
+- `high` for complex or high-risk work;
 - `xhigh` or `max` only where a measured gain justifies the cost.
 
 Fable specifics:
